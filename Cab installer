@@ -1,0 +1,59 @@
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+# Create Form
+$form = New-Object System.Windows.Forms.Form
+$form.Text = "CAB Installer Selection"
+$form.Size = New-Object System.Drawing.Size(400, 300)
+$form.StartPosition = "CenterScreen"
+
+# Create ListBox to display cab files
+$listBox = New-Object System.Windows.Forms.ListBox
+$listBox.Size = New-Object System.Drawing.Size(350, 200)
+$listBox.Location = New-Object System.Drawing.Point(20, 20)
+$listBox.SelectionMode = 'MultiExtended'
+
+# Button to browse folder
+$btnBrowse = New-Object System.Windows.Forms.Button
+$btnBrowse.Text = "Browse"
+$btnBrowse.Location = New-Object System.Drawing.Point(20, 230)
+$btnBrowse.AutoSize = $true
+
+# Button to install selected cab files
+$btnInstall = New-Object System.Windows.Forms.Button
+$btnInstall.Text = "Install"
+$btnInstall.Location = New-Object System.Drawing.Point(300, 230)
+$btnInstall.AutoSize = $true
+
+# Function to populate the ListBox with cab files
+function Load-CabFiles {
+    $folderBrowser = New-Object System.Windows.Forms.FolderBrowserDialog
+    if ($folderBrowser.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        $cabFiles = Get-ChildItem -Path $folderBrowser.SelectedPath -Filter *.cab -File
+        $listBox.Items.Clear()
+        foreach ($file in $cabFiles) {
+            $listBox.Items.Add($file.FullName)
+        }
+    }
+}
+
+# Function to install selected cab files using DISM
+function Install-SelectedFiles {
+    foreach ($selectedItem in $listBox.SelectedItems) {
+        Start-Process -FilePath "dism.exe" -ArgumentList "/Online", "/Add-Package", "/PackagePath:$selectedItem" -Wait
+    }
+    [System.Windows.Forms.MessageBox]::Show("Selected CAB files have been installed.", "Installation Complete")
+}
+
+# Add event handlers
+$btnBrowse.Add_Click({ Load-CabFiles })
+$btnInstall.Add_Click({ Install-SelectedFiles })
+
+# Add controls to the form
+$form.Controls.Add($listBox)
+$form.Controls.Add($btnBrowse)
+$form.Controls.Add($btnInstall)
+
+# Show the form
+$form.Topmost = $true
+$form.ShowDialog()
