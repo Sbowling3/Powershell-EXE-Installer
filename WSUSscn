@@ -3,17 +3,131 @@ $UpdateServiceManager = New-Object -ComObject Microsoft.Update.ServiceManager
 $UpdateService = $UpdateServiceManager.AddScanPackageService("Offline Sync Service", "c:\wsusscn2.cab")
 $UpdateSearcher = $UpdateSession.CreateUpdateSearcher()
 
-Write-Host "Searching for updates..."
-$UpdateSearcher.ServerSelection = 3 # ssOthers
-$UpdateSearcher.ServiceID = [string] $UpdateService.ServiceID
-$SearchResult = $UpdateSearcher.Search("IsInstalled=0")
-$Updates = $SearchResult.Updates
-If ($SearchResult.Updates.Count -eq 0) {
-    Write-Host "There are no applicable updates."
-    Exit
+Write-Host "Searching for updates...
 }
-Write-Host "List of applicable items on the machine when using wssuscan.cab:"
-For ($i = 0; $i -lt $SearchResult.Updates.Count; $i++) {
-    $update = $SearchResult.Updates.Item($i)
-    Write-Host ($i + 1) "> " $update.Title
+
+
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+# Function to perform a scan using wsusscn2.cab and display results
+function Perform-Scan {
+    param ($listBox)
+
+    # Initialize COM objects for update session and service manager
+    $UpdateSession = New-Object -ComObject Microsoft.Update.Session
+    $UpdateServiceManager = New-Object -ComObject Microsoft.Update.ServiceManager
+    $UpdateService = $UpdateServiceManager.AddScanPackageService("Offline Sync Service", "C:\wsusscn2.cab")
+    $UpdateSearcher = $UpdateSession.CreateUpdateSearcher()
+
+    $listBox.Items.Clear()
+    Write-Host "Searching for updates..."
+    $UpdateSearcher.ServerSelection = 3 # ssOthers
+    $UpdateSearcher.ServiceID = [string] $UpdateService.ServiceID
+    $SearchResult = $UpdateSearcher.Search("IsInstalled=0")
+    $Updates = $SearchResult.Updates
+
+    if ($SearchResult.Updates.Count -eq 0) {
+        [System.Windows.Forms.MessageBox]::Show("There are no applicable updates.", "No Updates Found")
+        return @()
+    }
+
+    Write-Host "List of applicable items on the machine when using wsusscn2.cab:"
+    $results = @()
+    for ($i = 0; $i -lt $SearchResult.Updates.Count; $i++) {
+        $update = $SearchResult.Updates.Item($i)
+        $results += [PSCustomObject]@{ Title = $update.Title; Id = $update.KBArticleIDs[0] }
+        $listBox.Items.Add($update.Title)
+        Write-Host ($i + 1) "> " $update.Title
+    }
+
+    return $results
 }
+
+# Function to install selected cab files using DISM
+function Install-SelectedFiles {
+    param ($listBox, $scanResults)
+
+    foreach ($selectedItem in $listBox.SelectedItems) {
+        $result = $scanResults | Where-Object { $_.Title -eq $selectedItem }
+        $openFileDialog = New-Object System.Windows.Forms.OpenFileDialog
+        $openFileDialog.Filter = "CAB files (*.cab)|*.cab"
+        if ($openFileDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+            $filePath = $openFileDialog.FileName
+            Start-Process -FilePath "dism.exe" -ArgumentList "/Online", "/Add-Package", "/PackagePath:$filePath" -Wait
+        }
+    }
+    [System.Windows.Forms.MessageBox]::Show("Selected updates have been installed.", "Installation Complete")
+}
+
+# Create Form
+$form = New-Object System.Windows.Forms.Form
+$form.Text = "CAB Update Installer"
+$form.Size = New-Object System.Drawing.Size(500, 400)
+$form.StartPosition = "CenterScreen"
+
+# Create a label for instructions
+$label = New-Object System.Windows.Forms.Label
+$label.Text = "1. Browse for wsusscn2.cab file and copy to C:\wsusscn2.cab"
+$label.Size = New-Object System.Drawing.Size(450, 20)
+$label.Location = New-Object System.Drawing.Point(20, 10)
+$form.Controls.Add($label)
+
+# Create Button to browse for wsusscn2.cab file
+$btnBrowseCab = New-Object System.Windows.Forms.Button
+$btnBrowseCab.Text = "Browse CAB"
+$btnBrowseCab.Location = New-Object System.Drawing.Point(20, 40)
+$btnBrowseCab.AutoSize = $true
+$form.Controls.Add($btnBrowseCab)
+
+# Create Button to perform scan
+$btnScan = New-Object System.Windows.Forms.Button
+$btnScan.Text = "Scan for Updates"
+$btnScan.Location = New-Object System.Drawing.Point(120, 40)
+$btnScan.AutoSize = $true
+$btnScan.Enabled = $false
+$form.Controls.Add($btnScan)
+
+# Create a ListBox to display scan results
+$scanResultsListBox = New-Object System.Windows.Forms.ListBox
+$scanResultsListBox.Size = New-Object System.Drawing.Size(450, 200)
+$scanResultsListBox.Location = New-Object System.Drawing.Point(20, 80)
+$scanResultsListBox.SelectionMode = 'MultiExtended'
+$form.Controls.Add($scanResultsListBox)
+
+# Create Button to install selected updates
+$btnInstall = New-Object System.Windows.Forms.Button
+$btnInstall.Text = "Install Selected Updates"
+$btnInstall.Location = New-Object System.Drawing.Point(20, 300)
+$btnInstall.AutoSize = $true
+$btnInstall.Enabled = $false
+$form.Controls.Add($btnInstall)
+
+# Event Handler for Browse Button
+$btnBrowseCab.Add_Click({
+    $openFileDialog = New-Object System.Windows.Forms.OpenFileDialog
+    $openFileDialog.Filter = "CAB files (*.cab)|*.cab"
+    if ($openFileDialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+        $selectedCabPath = $openFileDialog.FileName
+        Copy-Item -Path $selectedCabPath -Destination "C:\wsusscn2.cab" -Force
+        [System.Windows.Forms.MessageBox]::Show("CAB file copied to C:\wsusscn2.cab.", "CAB Copied")
+        $btnScan.Enabled = $true
+    }
+})
+
+# Event Handler for Scan Button
+$btnScan.Add_Click({
+    $scanResults = Perform-Scan -listBox $scanResultsListBox
+    if ($scanResults.Count -gt 0) {
+        $btnInstall.Enabled = $true
+    }
+})
+
+# Event Handler for Install Button
+$btnInstall.Add_Click({
+    Install-SelectedFiles -listBox $scanResultsListBox -scanResults $scanResults
+})
+
+# Show the form
+$form.Topmost = $true
+$form.ShowDialog()
